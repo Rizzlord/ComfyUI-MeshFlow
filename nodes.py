@@ -1,0 +1,133 @@
+import sys
+import os
+import torch
+import numpy as np
+import trimesh as tm
+from PIL import Image
+import folder_paths
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from meshflow.pipelines import MeshFlowPipeline
+from meshflow.utils.mesh import Mesh
+
+_PIPELINE_CACHE = {}
+
+def get_pipeline(model_path, device, dtype, compile_models, num_verts):
+    cache_key = (model_path, device, dtype, compile_models, num_verts)
+    if cache_key not in _PIPELINE_CACHE:
+        _PIPELINE_CACHE.clear()
+        pipeline = MeshFlowPipeline.from_pretrained(
+            model_path=model_path,
+            device=device,
+            dtype=dtype,
+            compile_models=compile_models,
+            num_verts=num_verts,
+        )
+        if pipeline._visual_encoder_cfg is not None:
+            hub_dir = pipeline._visual_encoder_cfg.get("hub_dir", "")
+            if not os.path.exists(hub_dir):
+                home_hub_dir = os.path.join(os.path.expanduser("~"), ".cache", "torch", "hub", "facebookresearch_dinov3_main")
+                pipeline._visual_encoder_cfg["hub_dir"] = home_hub_dir
+            
+            local_weights = os.path.join(folder_paths.models_dir, "facebook", "dinov3-vitl16-pretrain-lvd1689m", "dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth")
+            if os.path.exists(local_weights):
+                pipeline._visual_encoder_cfg["hub_weights"] = local_weights
+            else:
+                hub_weights = pipeline._visual_encoder_cfg.get("hub_weights")
+                if hub_weights and not os.path.exists(hub_weights):
+                    pipeline._visual_encoder_cfg["hub_weights"] = None
+        _PIPELINE_CACHE[cache_key] = pipeline
+    return _PIPELINE_CACHE[cache_key]
+
+class MeshFlowRemesh:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "trimesh": ("TRIMESH", {"tooltip": "The input 3D model to be remeshed."}),
+                "model_name": (["meshflow", "meshflow_w_num_verts_control"], {"default": "meshflow", "tooltip": "Select the MeshFlow model to use. 'meshflow' is the standard model. 'meshflow_w_num_verts_control' allows dynamic control of the generated mesh resolution."}),
+                "steps": ("INT", {"default": 28, "min": 1, "max": 1000, "step": 1, "tooltip": "Number of diffusion sampling steps. Higher values can increase detail but take longer."}),
+                "guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 100.0, "step": 0.1, "tooltip": "Classifier-Free Guidance (CFG) scale for visual conditioning. Only effective when reference_image is connected."}),
+                "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff, "tooltip": "Random seed for sampling latents."}),
+                "num_verts": ([1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192], {"default": 4096, "tooltip": "Target vertex resolution. Roughly controls the generated mesh resolution."}),
+                "device": (["cuda", "cpu"], {"default": "cuda", "tooltip": "Computation device to run the model on (cuda or cpu)."}),
+                "dtype": (["fp16", "bf16", "fp32"], {"default": "fp16", "tooltip": "Precision model dtype (fp16, bf16, or fp32)."}),
+                "compile": ("BOOLEAN", {"default": False, "tooltip": "Whether to use torch.compile on CUDA for faster inference."}),
+                "use_rmbg": ("BOOLEAN", {"default": False, "tooltip": "Enable automatic background removal and foreground cropping for the reference image."}),
+                "fill_holes": ("BOOLEAN", {"default": False, "tooltip": "Automatically closes and triangulates boundary loops in the final mesh topology."}),
+            },
+            "optional": {
+                "reference_image": ("IMAGE", {"tooltip": "Optional reference image for image-conditioned generation."}),
+            }
+        }
+
+    RETURN_TYPES = ("TRIMESH",)
+    RETURN_NAMES = ("trimesh",)
+    FUNCTION = "remesh"
+    CATEGORY = "MeshFlow"
+
+    def remesh(self, trimesh, model_name, steps, guidance_scale, seed, num_verts, device, dtype, compile, use_rmbg, fill_holes, reference_image=None):
+        model_path = os.path.join(folder_paths.models_dir, "facebook", "meshflow", model_name)
+        if not os.path.isdir(model_path):
+            raise FileNotFoundError(f"MeshFlow model path not found at {model_path}. Please download and place the config.yaml and model.pth in that directory.")
+
+        pipeline = get_pipeline(model_path, device, dtype, compile, num_verts)
+        pipeline.use_rmbg = use_rmbg
+
+        if reference_image is not None:
+            hub_dir = pipeline._visual_encoder_cfg.get("hub_dir")
+            if hub_dir and not os.path.exists(hub_dir):
+                os.makedirs(os.path.dirname(hub_dir), exist_ok=True)
+                import subprocess
+                subprocess.run(["git", "clone", "https://github.com/facebookresearch/dinov3.git", hub_dir], check=True)
+
+        if isinstance(trimesh, tm.Scene):
+            parts = []
+            for _, node in trimesh.graph.to_flattened().items():
+                name = node["geometry"]
+                if name in trimesh.geometry and isinstance(trimesh.geometry[name], tm.Trimesh):
+                    parts.append(trimesh.geometry[name].copy().apply_transform(node["transform"]))
+            trimesh = tm.util.concatenate(parts)
+
+        mesh_in = Mesh(
+            verts=torch.tensor(trimesh.vertices, dtype=torch.float32),
+            faces=torch.tensor(trimesh.faces, dtype=torch.int64),
+            device=torch.device(device)
+        )
+        mesh_in.preprocess()
+        mesh_in.normalize(normalize_by="bsphere", size=2.0)
+
+        pil_image = None
+        if reference_image is not None:
+            img_tensor = reference_image[0]
+            if img_tensor.shape[-1] == 4:
+                img_tensor = img_tensor[..., :3]
+            img_np = (img_tensor * 255.0).clamp(0, 255).to(torch.uint8).cpu().numpy()
+            pil_image = Image.fromarray(img_np)
+
+        if pil_image is None:
+            guidance_scale = 1.0
+
+        out_mesh, latents = pipeline.run(
+            mesh=mesh_in,
+            image=pil_image,
+            steps=steps,
+            guidance_scale=guidance_scale,
+            seed=seed,
+            num_verts=num_verts,
+            return_latent=True
+        )
+
+        if fill_holes:
+            out_mesh = pipeline.decode_latent(latents, fill_holes=True)
+
+        return (out_mesh.to_trimesh(),)
+
+NODE_CLASS_MAPPINGS = {
+    "MeshFlowRemesh": MeshFlowRemesh
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "MeshFlowRemesh": "MeshFlow Remesh"
+}

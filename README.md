@@ -66,7 +66,8 @@ ComfyUI/models/facebook/dinov3-vitl16-pretrain-lvd1689m/
 | `steps` | `INT` | Number of diffusion sampling steps (Default: 28). |
 | `guidance_scale` | `FLOAT` | CFG scale for image conditioning (Only active if `reference_image` is connected). |
 | `seed` | `INT` | Random seed for sampling latents. |
-| `num_verts` | `COMBO` | Target vertex resolution (1024 to 8192). Only active with the `meshflow_w_num_verts_control` model. |
+| `base_num_verts` | `COMBO` | The base resolution/point count of the loaded model checkpoint (1024, 2048, 4096, 8192, or 16384). |
+| `points` | `INT` | Target vertex resolution of the generated output mesh (1024 to 16384). Only active with the `meshflow_w_num_verts_control` model. |
 | `device` | `COMBO` | Execution device: `cuda` or `cpu`. |
 | `dtype` | `COMBO` | Computation precision: `fp16`, `bf16`, or `fp32`. |
 | `compile` | `BOOLEAN` | Uses `torch.compile` on CUDA for faster inference speeds. |

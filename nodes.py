@@ -50,7 +50,8 @@ class MeshFlowRemesh:
                 "steps": ("INT", {"default": 28, "min": 1, "max": 1000, "step": 1, "tooltip": "Number of diffusion sampling steps. Higher values can increase detail but take longer."}),
                 "guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 100.0, "step": 0.1, "tooltip": "Classifier-Free Guidance (CFG) scale for visual conditioning. Only effective when reference_image is connected."}),
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff, "tooltip": "Random seed for sampling latents."}),
-                "num_verts": ([1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192], {"default": 4096, "tooltip": "Target vertex resolution. Roughly controls the generated mesh resolution."}),
+                "base_num_verts": ([1024, 2048, 4096, 8192, 16384], {"default": 4096, "tooltip": "The base resolution/point count of the loaded model checkpoint (sequence length)."}),
+                "points": ("INT", {"default": 4096, "min": 1024, "max": 16384, "step": 256, "tooltip": "Target resolution (points/vertices) of the generated output mesh."}),
                 "device": (["cuda", "cpu"], {"default": "cuda", "tooltip": "Computation device to run the model on (cuda or cpu)."}),
                 "dtype": (["fp16", "bf16", "fp32"], {"default": "fp16", "tooltip": "Precision model dtype (fp16, bf16, or fp32)."}),
                 "compile": ("BOOLEAN", {"default": False, "tooltip": "Whether to use torch.compile on CUDA for faster inference."}),
@@ -67,12 +68,12 @@ class MeshFlowRemesh:
     FUNCTION = "remesh"
     CATEGORY = "MeshFlow"
 
-    def remesh(self, trimesh, model_name, steps, guidance_scale, seed, num_verts, device, dtype, compile, use_rmbg, fill_holes, reference_image=None):
+    def remesh(self, trimesh, model_name, steps, guidance_scale, seed, base_num_verts, points, device, dtype, compile, use_rmbg, fill_holes, reference_image=None):
         model_path = os.path.join(folder_paths.models_dir, "facebook", "meshflow", model_name)
         if not os.path.isdir(model_path):
             raise FileNotFoundError(f"MeshFlow model path not found at {model_path}. Please download and place the config.yaml and model.pth in that directory.")
 
-        pipeline = get_pipeline(model_path, device, dtype, compile, num_verts)
+        pipeline = get_pipeline(model_path, device, dtype, compile, base_num_verts)
         pipeline.use_rmbg = use_rmbg
 
         if reference_image is not None:
@@ -115,7 +116,7 @@ class MeshFlowRemesh:
             steps=steps,
             guidance_scale=guidance_scale,
             seed=seed,
-            num_verts=num_verts,
+            num_verts=points,
             return_latent=True
         )
 

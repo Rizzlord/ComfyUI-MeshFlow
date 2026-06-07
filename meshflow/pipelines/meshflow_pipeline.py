@@ -119,18 +119,16 @@ class MeshFlowPipeline:
         use_proj_cond_on_temb = bool(scfg.denoiser_model.get("use_proj_cond_on_temb", False))
 
         num_latents = int(scfg.mesh_model.num_latents)
-        if use_proj_cond_on_temb:
-            if num_verts is not None:
-                num_verts = int(num_verts)
-                config_num_verts = n_samples = input_size = num_verts
+        if num_verts is not None:
+            num_verts = int(num_verts)
+            config_num_verts = n_samples = input_size = num_verts
+            if use_proj_cond_on_temb:
+                pass
+            else:
+                num_latents = num_verts
         else:
-            if num_verts is not None:
-                print(
-                    "[MeshFlowPipeline] Ignoring num_verts: "
-                    "denoiser_model.use_proj_cond_on_temb is disabled in config"
-                )
-            num_verts = None
-            num_latents = None
+            if not use_proj_cond_on_temb:
+                num_latents = None
 
         dtype = resolve_torch_dtype(dtype)
         device = torch.device(device if torch.cuda.is_available() or device == "cpu" else "cpu")

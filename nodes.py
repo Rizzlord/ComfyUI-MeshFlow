@@ -13,8 +13,8 @@ from meshflow.utils.mesh import Mesh
 
 _PIPELINE_CACHE = {}
 
-def get_pipeline(model_path, device, dtype, compile_models, num_verts):
-    cache_key = (model_path, device, dtype, compile_models, num_verts)
+def get_pipeline(model_path, device, dtype, compile_models, num_verts, image_size):
+    cache_key = (model_path, device, dtype, compile_models, num_verts, image_size)
     if cache_key not in _PIPELINE_CACHE:
         _PIPELINE_CACHE.clear()
         pipeline = MeshFlowPipeline.from_pretrained(
@@ -25,6 +25,14 @@ def get_pipeline(model_path, device, dtype, compile_models, num_verts):
             num_verts=num_verts,
         )
         if pipeline._visual_encoder_cfg is not None:
+            pipeline._visual_encoder_cfg["image_size"] = image_size
+            from meshflow.models.condition_encoder import make_empty_visual_embeds, resolve_visual_embed_dim
+            embed_dim = resolve_visual_embed_dim(
+                pipeline._visual_encoder_cfg,
+                fallback=1024,
+            )
+            pipeline._empty_visual_embeds = make_empty_visual_embeds(image_size, embed_dim)
+
             hub_dir = pipeline._visual_encoder_cfg.get("hub_dir", "")
             if not os.path.exists(hub_dir):
                 home_hub_dir = os.path.join(os.path.expanduser("~"), ".cache", "torch", "hub", "facebookresearch_dinov3_main")
@@ -52,6 +60,7 @@ class MeshFlowRemesh:
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff, "tooltip": "Random seed for sampling latents."}),
                 "base_num_verts": ([1024, 2048, 4096, 8192, 16384], {"default": 4096, "tooltip": "The base resolution/point count of the loaded model checkpoint (sequence length)."}),
                 "points": ("INT", {"default": 4096, "min": 1024, "max": 16384, "step": 256, "tooltip": "Target resolution (points/vertices) of the generated output mesh."}),
+                "image_size": ([512, 1024, 2048], {"default": 512, "tooltip": "Resolution to resize and center crop the reference image to before processing."}),
                 "device": (["cuda", "cpu"], {"default": "cuda", "tooltip": "Computation device to run the model on (cuda or cpu)."}),
                 "dtype": (["fp16", "bf16", "fp32"], {"default": "fp16", "tooltip": "Precision model dtype (fp16, bf16, or fp32)."}),
                 "compile": ("BOOLEAN", {"default": False, "tooltip": "Whether to use torch.compile on CUDA for faster inference."}),
@@ -68,12 +77,12 @@ class MeshFlowRemesh:
     FUNCTION = "remesh"
     CATEGORY = "MeshFlow"
 
-    def remesh(self, trimesh, model_name, steps, guidance_scale, seed, base_num_verts, points, device, dtype, compile, use_rmbg, fill_holes, reference_image=None):
+    def remesh(self, trimesh, model_name, steps, guidance_scale, seed, base_num_verts, points, image_size, device, dtype, compile, use_rmbg, fill_holes, reference_image=None):
         model_path = os.path.join(folder_paths.models_dir, "facebook", "meshflow", model_name)
         if not os.path.isdir(model_path):
             raise FileNotFoundError(f"MeshFlow model path not found at {model_path}. Please download and place the config.yaml and model.pth in that directory.")
 
-        pipeline = get_pipeline(model_path, device, dtype, compile, base_num_verts)
+        pipeline = get_pipeline(model_path, device, dtype, compile, base_num_verts, image_size)
         pipeline.use_rmbg = use_rmbg
 
         if reference_image is not None:

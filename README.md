@@ -68,6 +68,7 @@ ComfyUI/models/facebook/dinov3-vitl16-pretrain-lvd1689m/
 | `seed` | `INT` | Random seed for sampling latents. |
 | `base_num_verts` | `COMBO` | The base resolution/point count of the loaded model checkpoint (1024, 2048, 4096, 8192, or 16384). |
 | `points` | `INT` | Target vertex resolution of the generated output mesh (1024 to 16384). Only active with the `meshflow_w_num_verts_control` model. |
+| `image_size` | `COMBO` | Resolution to resize and center crop the reference image to (512, 1024, or 2048). |
 | `device` | `COMBO` | Execution device: `cuda` or `cpu`. |
 | `dtype` | `COMBO` | Computation precision: `fp16`, `bf16`, or `fp32`. |
 | `compile` | `BOOLEAN` | Uses `torch.compile` on CUDA for faster inference speeds. |

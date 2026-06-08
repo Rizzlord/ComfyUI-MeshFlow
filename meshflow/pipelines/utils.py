@@ -133,6 +133,7 @@ def flow_sample(
     diffusion_model: torch.nn.Module,
     shape: Union[List[int], Tuple[int]],
     steps: int,
+    sampler: str = "euler",
     visual_cond: Optional[torch.Tensor] = None,
     shape_cond: Optional[torch.Tensor] = None,
     guidance_scale: float = 3.0,
@@ -195,32 +196,64 @@ def flow_sample(
             for k, v in joint_attention_kwargs.items()
         }
 
-    timesteps, _ = retrieve_timesteps(scheduler, steps + 1, device)
-    distance = (timesteps[:-1] - timesteps[1:]) / scheduler.config.num_train_timesteps
-
-    for i, t in enumerate(
-        tqdm(timesteps[:-1], disable=disable_prog, desc="Flow Sampling:", leave=False)
-    ):
-        latent_model_input = (
-            torch.cat([latents] * 2) if do_classifier_free_guidance else latents
+    def _predict_velocity(x, t_norm_value):
+        latent_input = (
+            torch.cat([x] * 2) if do_classifier_free_guidance else x
         )
-        timestep_tensor = torch.tensor([t], dtype=latents.dtype, device=device)
-        timestep_tensor = timestep_tensor.expand(latent_model_input.shape[0])
-        timestep_tensor = timestep_tensor / scheduler.config.num_train_timesteps
-
-        noise_pred = diffusion_model(
-            latent_model_input,
-            timestep_tensor,
+        t_tensor = torch.full(
+            (latent_input.shape[0],), t_norm_value,
+            dtype=x.dtype, device=device,
+        )
+        pred = diffusion_model(
+            latent_input,
+            t_tensor,
             visual_condition=visual_cond,
             joint_attention_kwargs=joint_attention_kwargs_for_forward,
             **(denoiser_model_kwargs or {}),
         ).sample
-
         if do_classifier_free_guidance:
-            noise_pred_uncond, noise_pred_cond = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + guidance_scale * (
-                noise_pred_cond - noise_pred_uncond
+            pred_uncond, pred_cond = pred.chunk(2)
+            pred = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
+        return pred
+
+    num_train_timesteps = scheduler.config.num_train_timesteps
+    timesteps, _ = retrieve_timesteps(scheduler, steps + 1, device)
+    distance = (timesteps[:-1] - timesteps[1:]) / num_train_timesteps
+
+    sampler_label = {"euler": "Euler", "midpoint": "Midpoint", "heun": "Heun", "rk4": "RK4"}.get(sampler, sampler)
+    for i, t in enumerate(
+        tqdm(timesteps[:-1], disable=disable_prog, desc=f"Flow Sampling ({sampler_label}):", leave=False)
+    ):
+        dt = distance[i]
+        t_norm = t / num_train_timesteps
+
+        if sampler == "euler":
+            v = _predict_velocity(latents, t_norm)
+            latents = latents - dt * v
+
+        elif sampler == "midpoint":
+            v1 = _predict_velocity(latents, t_norm)
+            x_mid = latents - (dt / 2) * v1
+            v2 = _predict_velocity(x_mid, t_norm - dt / 2)
+            latents = latents - dt * v2
+
+        elif sampler == "heun":
+            v1 = _predict_velocity(latents, t_norm)
+            x_pred = latents - dt * v1
+            v2 = _predict_velocity(x_pred, t_norm - dt)
+            latents = latents - dt * (v1 + v2) / 2
+
+        elif sampler == "rk4":
+            k1 = _predict_velocity(latents, t_norm)
+            k2 = _predict_velocity(latents - (dt / 2) * k1, t_norm - dt / 2)
+            k3 = _predict_velocity(latents - (dt / 2) * k2, t_norm - dt / 2)
+            k4 = _predict_velocity(latents - dt * k3, t_norm - dt)
+            latents = latents - dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
+
+        else:
+            raise ValueError(
+                f"Unknown sampler: {sampler!r}. "
+                "Choose from: euler, midpoint, heun, rk4"
             )
 
-        latents = latents - distance[i] * noise_pred
         yield latents, t

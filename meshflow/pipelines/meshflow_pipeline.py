@@ -355,12 +355,12 @@ class MeshFlowPipeline:
         visual_cond: torch.Tensor,
         joint_attention_kwargs: dict,
         steps: Optional[int] = None,
+        sampler: str = "euler",
         guidance_scale: Optional[float] = None,
         seed: int = 42,
         disable_prog: bool = False,
         num_verts: Optional[int] = None,
     ) -> torch.Tensor:
-        """Run flow-matching sampling and return final latents."""
         denoiser = self.models["denoiser"]
         steps = self.num_inference_steps if steps is None else int(steps)
         guidance_scale = self.guidance_scale if guidance_scale is None else float(guidance_scale)
@@ -382,6 +382,7 @@ class MeshFlowPipeline:
                 denoiser,
                 sample_shape,
                 steps=steps,
+                sampler=sampler,
                 visual_cond=visual_cond,
                 guidance_scale=guidance_scale,
                 do_classifier_free_guidance=use_cfg,
@@ -415,6 +416,7 @@ class MeshFlowPipeline:
         mesh: Union[str, Mesh],
         image: Optional[Image.Image] = None,
         steps: Optional[int] = None,
+        sampler: str = "euler",
         guidance_scale: Optional[float] = None,
         seed: int = 42,
         preprocess_image: bool = True,
@@ -422,22 +424,6 @@ class MeshFlowPipeline:
         disable_prog: bool = False,
         num_verts: Optional[int] = None,
     ):
-        """
-        End-to-end MeshFlow inference.
-
-        Args:
-            mesh: Input mesh/point-cloud path or `Mesh` instance for RoPE surface sampling.
-            image: Optional reference image for visual conditioning.
-            steps: Flow sampling steps (default: from config).
-            guidance_scale: CFG scale (default: from config).
-            seed: Random seed.
-            preprocess_image: Whether to run image preprocessing before encoding.
-            return_latent: If True, return `(mesh, latents)` instead of mesh only.
-            disable_prog: Disable tqdm progress bar during sampling.
-            num_verts: Override vertex count for proj_cond_on_temb only (default:
-                pipeline ``num_verts``). RoPE surface sampling always uses
-                ``pipeline.num_verts`` to match denoiser ``input_size``.
-        """
         proj_num_verts = num_verts or self.num_verts
         surface_pc = self.sample_surface_points(mesh, num_verts=self.num_verts)
         joint_kwargs = self.get_rope_cond(surface_pc)
@@ -450,6 +436,7 @@ class MeshFlowPipeline:
             visual_cond,
             joint_kwargs,
             steps=steps,
+            sampler=sampler,
             guidance_scale=guidance_scale,
             seed=seed,
             disable_prog=disable_prog,

@@ -56,6 +56,7 @@ class MeshFlowRemesh:
                 "trimesh": ("TRIMESH", {"tooltip": "The input 3D model to be remeshed."}),
                 "model_name": (["meshflow", "meshflow_w_num_verts_control"], {"default": "meshflow", "tooltip": "Select the MeshFlow model to use. 'meshflow' is the standard model. 'meshflow_w_num_verts_control' allows dynamic control of the generated mesh resolution."}),
                 "steps": ("INT", {"default": 28, "min": 1, "max": 1000, "step": 1, "tooltip": "Number of diffusion sampling steps. Higher values can increase detail but take longer."}),
+                "sampler": (["euler", "midpoint", "heun", "rk4"], {"default": "heun", "tooltip": "ODE solver for flow-matching sampling. Higher-order solvers (heun, rk4) produce more accurate trajectories; heun uses 2 model evals per step, rk4 uses 4."}),
                 "guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 100.0, "step": 0.1, "tooltip": "Classifier-Free Guidance (CFG) scale for visual conditioning. Only effective when reference_image is connected."}),
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff, "tooltip": "Random seed for sampling latents."}),
                 "base_num_verts": ([1024, 2048, 4096, 8192, 16384], {"default": 4096, "tooltip": "The base resolution/point count of the loaded model checkpoint (sequence length)."}),
@@ -77,7 +78,7 @@ class MeshFlowRemesh:
     FUNCTION = "remesh"
     CATEGORY = "MeshFlow"
 
-    def remesh(self, trimesh, model_name, steps, guidance_scale, seed, base_num_verts, points, image_size, device, dtype, compile, use_rmbg, fill_holes, reference_image=None):
+    def remesh(self, trimesh, model_name, steps, sampler, guidance_scale, seed, base_num_verts, points, image_size, device, dtype, compile, use_rmbg, fill_holes, reference_image=None):
         model_path = os.path.join(folder_paths.models_dir, "facebook", "meshflow", model_name)
         if not os.path.isdir(model_path):
             raise FileNotFoundError(f"MeshFlow model path not found at {model_path}. Please download and place the config.yaml and model.pth in that directory.")
@@ -123,6 +124,7 @@ class MeshFlowRemesh:
             mesh=mesh_in,
             image=pil_image,
             steps=steps,
+            sampler=sampler,
             guidance_scale=guidance_scale,
             seed=seed,
             num_verts=points,

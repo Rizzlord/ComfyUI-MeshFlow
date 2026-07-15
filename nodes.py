@@ -60,7 +60,7 @@ class MeshFlowRemesh:
                 "guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 100.0, "step": 0.1, "tooltip": "Classifier-Free Guidance (CFG) scale for visual conditioning. Only effective when reference_image is connected."}),
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff, "tooltip": "Random seed for sampling latents."}),
                 "base_num_verts": ([1024, 2048, 4096, 8192, 16384], {"default": 4096, "tooltip": "The base resolution/point count of the loaded model checkpoint (sequence length)."}),
-                "points": ("INT", {"default": 4096, "min": 1024, "max": 16384, "step": 256, "tooltip": "Target resolution (points/vertices) of the generated output mesh."}),
+                "points": ([1024, 2048, 4096, 8192, 16384], {"default": 4096, "tooltip": "Target resolution (points/vertices) of the generated output mesh."}),
                 "image_size": ([512, 1024, 2048], {"default": 512, "tooltip": "Resolution to resize and center crop the reference image to before processing."}),
                 "device": (["cuda", "cpu"], {"default": "cuda", "tooltip": "Computation device to run the model on (cuda or cpu)."}),
                 "dtype": (["fp16", "bf16", "fp32"], {"default": "fp16", "tooltip": "Precision model dtype (fp16, bf16, or fp32)."}),
